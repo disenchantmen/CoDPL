@@ -9,11 +9,9 @@ from trainer import *
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', default='tmall', help='lastfm/tmall/retailrocket')
 parser.add_argument('--len-session', type=int, default=50)
-
 parser.add_argument('--dim', type=int, default=100)
 parser.add_argument('--layers', type=int, default=1)
 parser.add_argument('--dropout', type=float, default=0.2)
-
 parser.add_argument('--epochs', type=int, default=1)
 parser.add_argument('--num-workers', type=int, default=0)
 parser.add_argument('--batch_size', type=int, default=100)
@@ -21,14 +19,12 @@ parser.add_argument('--lr', type=float, default=0.001)
 parser.add_argument('--lr_dc', type=float, default=0.1)
 parser.add_argument('--lr_dc_step', type=int, default=3)
 parser.add_argument('--l2', type=float, default=1e-5)
-
 parser.add_argument('--cl', type=int, default=1)
 parser.add_argument('--k', type=int, default=4)
 parser.add_argument('--temp', type=float, default=0.2)
 parser.add_argument('--sim', type=str, default='bleu')
 parser.add_argument('--beta', type=float, default=0.05)
 parser.add_argument('--w-k', type=int, default=12)
-
 parser.add_argument('--validation', action='store_true')
 parser.add_argument('--valid_portion', type=float, default=0.1)
 parser.add_argument('--log-interval', type=int, default=500)
@@ -43,7 +39,7 @@ parser.add_argument('--sim_threshold', type=float, default=0.9)
 parser.add_argument('--cf_only', action='store_true')
 parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
 parser.add_argument('--session_len_thresh', type=int, default=5)
-parser.add_argument('--lambda_cf', type=float, default=0.2)
+parser.add_argument('--lambda_cf', type=float, default=0.6)
 opt = parser.parse_args()
 
 MAX_CANDIDATE_SESS = 20000
