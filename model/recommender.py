@@ -241,24 +241,47 @@ class GraphRecommender(nn.Module):
         alias_inputs = alias_inputs.view(-1, alias_inputs.size(1), 1).expand(-1, -1, self.dim)
         seq_hidden = torch.gather(hidden, dim=1, index=alias_inputs)
 
-        _, long_emb_all, short_emb_all, _ = self.compute_sess_emb(inputs, seq_hidden)
+        final_sess_emb, long_emb_all, short_emb_all, _ = self.compute_sess_emb(inputs, seq_hidden)
         batch_size = long_emb_all.shape[0]
-
-        if self.use_cluster:
-            sim_values, sim_indices = self._retrieve_topk_with_cluster(long_emb_all, top_k_sim)
-        else:
-            sim_matrix = self.compute_long_sim(long_emb_all, self.memory_bank)
-            top_k = min(top_k_sim, self.candidate_sess_num)
-            sim_values, sim_indices = torch.topk(sim_matrix, k=top_k, dim=1)
+        bank_emb = self.memory_bank
+        batch_candidate_emb = long_emb_all
 
         cf_scores_list = []
         for i in range(batch_size):
             query_long_emb = long_emb_all[i:i + 1]
             query_short_emb = short_emb_all[i:i + 1]
-            sim_cand_indices = sim_indices[i]
-            sim_vals = sim_values[i]
 
-            valid_mask = sim_vals >= self.sim_threshold
+            sim_candidates = []
+            sim_scores = []
+
+            if self.use_cluster:
+                sim_values_bank, sim_indices_bank = self._retrieve_topk_with_cluster(query_long_emb, top_k_sim*2)
+                sim_vals_bank = sim_values_bank[0]
+                idx_bank = sim_indices_bank[0]
+                valid_mask_bank = sim_vals_bank > 0
+                sim_vals_bank = sim_vals_bank[valid_mask_bank]
+                idx_bank = idx_bank[valid_mask_bank]
+                cand_emb_bank = bank_emb[idx_bank]
+            else:
+                sim_matrix_bank = self.compute_long_sim(query_long_emb, bank_emb)[0]
+                sim_vals_bank, idx_bank = torch.topk(sim_matrix_bank, k=min(top_k_sim*2, self.candidate_sess_num), dim=-1)
+                cand_emb_bank = bank_emb[idx_bank]
+
+            sim_candidates.append(cand_emb_bank)
+            sim_scores.append(sim_vals_bank)
+
+            batch_mask = torch.ones(batch_size, dtype=torch.bool, device=self.device)
+            batch_mask[i] = False
+            batch_emb_valid = batch_candidate_emb[batch_mask]
+            if len(batch_emb_valid) > 0:
+                sim_vals_batch = self.compute_long_sim(query_long_emb, batch_emb_valid)[0]
+                sim_candidates.append(batch_emb_valid)
+                sim_scores.append(sim_vals_batch)
+
+            all_cand_emb = torch.cat(sim_candidates, dim=0)
+            all_sim_vals = torch.cat(sim_scores, dim=0)
+
+            valid_mask = all_sim_vals >= self.sim_threshold
             if torch.sum(valid_mask) == 0:
                 sess_norm = self.w_k * F.normalize(query_long_emb, dim=-1, p=2)
                 item_norm = F.normalize(graph_item_embs, dim=-1, p=2)
@@ -266,15 +289,18 @@ class GraphRecommender(nn.Module):
                 cf_scores_list.append(cf_score)
                 continue
 
-            sim_cand_indices = sim_cand_indices[valid_mask]
-            sim_vals = sim_vals[valid_mask]
-            cand_long_emb = self.memory_bank[sim_cand_indices]
+            all_cand_emb = all_cand_emb[valid_mask]
+            all_sim_vals = all_sim_vals[valid_mask]
 
-            concat_cand = torch.cat([cand_long_emb, query_short_emb.repeat(len(cand_long_emb),1)], dim=-1)
+            if len(all_cand_emb) > top_k_sim:
+                all_sim_vals, top_local_idx = torch.topk(all_sim_vals, k=top_k_sim)
+                all_cand_emb = all_cand_emb[top_local_idx]
+
+            concat_cand = torch.cat([all_cand_emb, query_short_emb.repeat(len(all_cand_emb),1)], dim=-1)
             cand_fusion_weights = F.softmax(self.fusion_mlp(concat_cand), dim=-1)
 
             cf_sess_emb = self.counterfactual_fusion(
-                cand_long_emb,
+                all_cand_emb,
                 query_short_emb,
                 cand_fusion_weights
             )
@@ -283,7 +309,7 @@ class GraphRecommender(nn.Module):
             graph_item_embs_norm = F.normalize(graph_item_embs, dim=-1, p=2)
             cf_scores_cand = torch.matmul(cf_sess_emb_norm, graph_item_embs_norm.transpose(1, 0))
 
-            sim_weight = F.softmax(sim_vals, dim=0).unsqueeze(-1)
+            sim_weight = F.softmax(all_sim_vals, dim=0).unsqueeze(-1)
             cf_score = torch.sum(cf_scores_cand * sim_weight, dim=0)
             cf_scores_list.append(cf_score)
 
