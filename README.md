@@ -1,4 +1,4 @@
-# CoDPL: Counterfactual dual-view preference learning for session-based recommendation
+# CoDPL: Counterfactual cross-session preference inference for session-based recommendation
 
 ## Requirements
 
